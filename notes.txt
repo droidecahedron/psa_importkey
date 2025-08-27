@@ -1,0 +1,3 @@
+
+
+The read-only type of persistent keys cannot be destroyed with the psa_destroy_key function. The PSA_KEY_PERSISTENCE_READ_ONLY macro is used for read-only keys. The key ID of a read-only key is writable again after a full erase of the device memory. Use the west -v flash --erase command for the full erase.
