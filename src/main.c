@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/random/random.h>
@@ -35,58 +36,7 @@ static uint8_t m_encrypted_text[PSA_CIPHER_ENCRYPT_OUTPUT_SIZE(SAMPLE_KEY_TYPE, 
                                                                NRF_CRYPTO_EXAMPLE_PERSISTENT_KEY_MAX_TEXT_SIZE)];
 static uint8_t m_decrypted_text[NRF_CRYPTO_EXAMPLE_PERSISTENT_KEY_MAX_TEXT_SIZE];
 
-LOG_MODULE_REGISTER(enc_central);
-
-#ifdef CONFIG_TRUSTED_STORAGE_STORAGE_BACKEND_SETTINGS
-
-static int setup_settings_backend(void)
-{
-    int rc = settings_subsys_init();
-
-    if (rc != 0)
-    {
-        LOG_ERR("%s failed (ret %d)", __func__, rc);
-        return rc;
-    }
-
-    return 0;
-}
-
-SYS_INIT(setup_settings_backend, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
-
-#endif /* CONFIG_TRUSTED_STORAGE_STORAGE_BACKEND_SETTINGS */
-
-#if defined(CONFIG_TRUSTED_STORAGE_BACKEND_AEAD_KEY_DERIVE_FROM_HUK) ||                                                \
-    defined(CONFIG_SECURE_STORAGE_ITS_TRANSFORM_AEAD_KEY_PROVIDER_HUK_LIBRARY)
-
-#include <hw_unique_key.h>
-
-#ifndef HUK_HAS_KMU
-#include <zephyr/sys/reboot.h>
-#endif
-
-int write_huk(void)
-{
-    if (!hw_unique_key_are_any_written())
-    {
-        LOG_INF("Writing random keys to KMU\n");
-        int result = hw_unique_key_write_random();
-
-        if (result != HW_UNIQUE_KEY_SUCCESS)
-        {
-            LOG_ERR("hw_unique_key_write_random returned error: %d\n", result);
-            return 0;
-        }
-        LOG_INF("Success!\n\n");
-#ifndef HUK_HAS_KMU
-        /* Reboot to allow the bootloader to load the key into CryptoCell. */
-        sys_reboot(0);
-#endif
-    }
-
-    return 0;
-}
-#endif
+LOG_MODULE_REGISTER(enc_central, LOG_LEVEL_DBG);
 
 psa_key_id_t mk;
 psa_key_id_t key_ids[3];
@@ -95,15 +45,12 @@ int crypto_init(void)
 {
     psa_status_t status;
 
-#if defined(CONFIG_TRUSTED_STORAGE_BACKEND_AEAD_KEY_DERIVE_FROM_HUK) ||                                                \
-    defined(CONFIG_SECURE_STORAGE_ITS_TRANSFORM_AEAD_KEY_PROVIDER_HUK_LIBRARY)
-    write_huk();
-#endif
-
+    LOG_INF("crypto init");
     /* Initialize PSA Crypto */
     status = psa_crypto_init();
     if (status != PSA_SUCCESS)
     {
+        LOG_ERR("unable to init psa crypto");
         return -1;
     }
 
@@ -125,7 +72,7 @@ int crypto_finish(void)
     return 0;
 }
 
-int import_key(uint8_t *key_buf, size_t key_len, size_t key_index)
+int import_key(uint8_t *key_buf, size_t key_len, psa_key_id_t key_index)
 {
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
@@ -135,12 +82,18 @@ int import_key(uint8_t *key_buf, size_t key_len, size_t key_index)
     psa_set_key_lifetime(&attributes, PSA_KEY_LIFETIME_PERSISTENT);
     psa_set_key_id(&attributes, key_index);
 
-    psa_status_t status = psa_import_key(&attributes, key_buf, key_len, &key_ids[key_index]);
-    memset(key_buf, 0, key_len);
-    status = psa_purge_key(key_index);
+    psa_status_t status = psa_import_key(&attributes, key_buf, key_len, &key_ids[key_index - 1]);
     if (status != PSA_SUCCESS)
     {
-        LOG_INF("psa_purge key failed %d", status);
+        LOG_ERR("IMPORT FAILED %d", status);
+        return -1;
+    }
+    LOG_INF("Key imported! index %d id %d", key_index - 1, key_ids[key_index - 1]);
+    memset(key_buf, 0, key_len);
+    status = psa_purge_key(key_ids[key_index - 1]);
+    if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("psa_purge key failed %d", status);
         return -1;
     }
 
@@ -161,17 +114,24 @@ int encrypt_buffer(psa_key_id_t key_id, const uint8_t *input, size_t input_len, 
 
     status = psa_cipher_encrypt_setup(&operation, key_id, PSA_ALG_CTR);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("unable to setup encrypt %d", status);
         return status;
-
+    }
     psa_cipher_generate_iv(&operation, iv, iv_len, gen_iv_len);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("unable to generate iv %d", status);
         return status;
-
+    }
     LOG_INF("generated IV: %s", iv);
 
     status = psa_cipher_update(&operation, input, input_len, output, output_size, output_len);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("unable to update cipher %d", status);
         return status;
+    }
 
     size_t finish_len = 0;
     status = psa_cipher_finish(&operation, output + *output_len, output_size - *output_len, &finish_len);
@@ -179,6 +139,8 @@ int encrypt_buffer(psa_key_id_t key_id, const uint8_t *input, size_t input_len, 
     {
         *output_len += finish_len;
     }
+
+    LOG_INF("encrypt success");
 
     return status;
 }
@@ -192,22 +154,29 @@ int decrypt_buffer(psa_key_id_t key_id, const uint8_t *input, size_t input_len, 
 
     status = psa_cipher_decrypt_setup(&operation, key_id, PSA_ALG_CTR);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("decrypt setup fail %d", status);
         return status;
-
+    }
     status = psa_cipher_set_iv(&operation, iv, iv_len);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("cipher set iv fail %d", status);
         return status;
-
+    }
     status = psa_cipher_update(&operation, input, input_len, output, output_size, output_len);
     if (status != PSA_SUCCESS)
+    {
+        LOG_ERR("psa cipher update fail %d", status);
         return status;
-
+    }
     size_t finish_len = 0;
     status = psa_cipher_finish(&operation, output + *output_len, output_size - *output_len, &finish_len);
     if (status == PSA_SUCCESS)
     {
         *output_len += finish_len;
     }
+    LOG_INF("decrypt attempt successfully executed");
     return status;
 }
 
@@ -227,12 +196,11 @@ int main(void)
     {
         status = psa_generate_random(DEBUG_MOCK_KEYS[i - 1],
                                      sizeof(DEBUG_MOCK_KEYS[i - 1]) / sizeof(DEBUG_MOCK_KEYS[i - 1][0]));
-        LOG_INF("made key %s", DEBUG_MOCK_KEYS[i - 1]);
         if (status != PSA_SUCCESS)
         {
             LOG_INF("unable to generate key %d (%d)", i, status);
         }
-        LOG_INF("importing key");
+        LOG_INF("made key %s, importing", DEBUG_MOCK_KEYS[i - 1]);
         import_key(DEBUG_MOCK_KEYS[i - 1], KEY_SIZE, i);
     }
 
@@ -241,13 +209,13 @@ int main(void)
     uint32_t olen;
     uint8_t initialization_vector[AES_BLOCK_SIZE];
     size_t iv_len = AES_BLOCK_SIZE;
-    size_t *gen_iv_len;
+    size_t gen_iv_len;
 
     LOG_INF("unenc msg: %s", m_plain_text);
     uint32_t random_key = rand() % 2;
     LOG_INF("random key handle %d", random_key);
     status = encrypt_buffer(key_ids[random_key], m_plain_text, sizeof(m_plain_text), m_encrypted_text,
-                            sizeof(m_encrypted_text), &olen, initialization_vector, iv_len, gen_iv_len);
+                            sizeof(m_encrypted_text), &olen, initialization_vector, iv_len, &gen_iv_len);
     if (status != PSA_SUCCESS)
     {
         LOG_INF("encrypt error %d", status);
@@ -264,10 +232,11 @@ int main(void)
     {
         LOG_INF("Decrypt attempt with key %d", i);
         status = decrypt_buffer(key_ids[i], m_encrypted_text, sizeof(m_encrypted_text), m_decrypted_text,
-                                sizeof(m_decrypted_text), &olen, initialization_vector, iv_len);
+                                PSA_CIPHER_UPDATE_OUTPUT_SIZE(SAMPLE_KEY_TYPE, SAMPLE_ALG, sizeof(m_encrypted_text)),
+                                &olen, initialization_vector, iv_len);
         if (status != PSA_SUCCESS)
         {
-            printf("Decryption failed: %d\n", status);
+            LOG_ERR("Decryption failed: %d\n", status);
             return -1;
         }
 
@@ -284,6 +253,11 @@ int main(void)
         }
     }
 
+    for (;;)
+    {
+        LOG_INF("alive");
+        k_msleep(10000);
+    }
     k_sleep(K_FOREVER);
     return 0;
 }
