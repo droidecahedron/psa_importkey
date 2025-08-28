@@ -305,7 +305,8 @@ int main(void)
         }
     }
 
-    crypto_finish();
+    //use this if you want to see keys get destroyed.
+    //crypto_finish();
 
     for (;;)
     {
