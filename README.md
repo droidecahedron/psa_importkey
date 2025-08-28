@@ -27,7 +27,7 @@ So it will iterate through all the keys it has to see if there's a match. You ca
 
 You can reset the device and it won't try to re-create new keys. It only creates new keys on a reset.
 
-This way, you can see the message encryption vary and which private key was successful and decrypting the message.
+This way, you can see the message encryption vary and which private key was successful in decrypting the message.
 
 The following [blog](https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/posts/intro-to-application-level-security-using-the-ecb-) is a good read for a lot of the thinking in the sample.
 
