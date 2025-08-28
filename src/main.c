@@ -45,7 +45,7 @@ LOG_MODULE_REGISTER(enc_central, LOG_LEVEL_DBG);
 #define KEY_ID_USER0 PSA_KEY_ID_USER_MIN + 0
 #define KEY_ID_USER1 PSA_KEY_ID_USER_MIN + 1
 #define KEY_ID_USER2 PSA_KEY_ID_USER_MIN + 2
-psa_key_id_t key_ids[3] = {KEY_ID_USER0, KEY_ID_USER1, KEY_ID_USER2};
+psa_key_id_t key_ids[NUM_KEYS] = {KEY_ID_USER0, KEY_ID_USER1, KEY_ID_USER2};
 
 int crypto_init(void)
 {
@@ -68,7 +68,7 @@ int crypto_finish(void)
     psa_status_t status;
 
     /* Destroy the key handle */
-    for(int i=0;i<NUM_KEYS;i++)
+    for (int i = 0; i < NUM_KEYS; i++)
         status = psa_destroy_key(key_ids[i]);
     if (status != PSA_SUCCESS)
     {
@@ -87,7 +87,7 @@ bool psa_key_exists(psa_key_id_t key_id)
     status = psa_get_key_attributes(key_id, &attrs);
     psa_reset_key_attributes(&attrs);
 
-    LOG_INF("KEY ID %d ATTR GET STATS %d",key_id,status);
+    LOG_INF("KEY ID %d ATTR GET STATS %d", key_id, status);
     // If the key isn't present, implementations return an error such as
     // PSA_ERROR_DOES_NOT_EXIST / PSA_ERROR_INVALID_HANDLE.
     return (status == PSA_SUCCESS);
@@ -230,7 +230,7 @@ int main(void)
 
         // start at 1 https://arm-software.github.io/psa-api/crypto/1.2/api/keys/ids.html#c.PSA_KEY_ID_NULL
         LOG_INF("generating and importing keys");
-        for (int i = 1; i < 4; i++)
+        for (int i = 1; i < NUM_KEYS + 1; i++)
         {
             status = psa_generate_random(DEBUG_MOCK_KEYS[i - 1],
                                          sizeof(DEBUG_MOCK_KEYS[i - 1]) / sizeof(DEBUG_MOCK_KEYS[i - 1][0]));
@@ -257,13 +257,13 @@ int main(void)
     LOG_INF("unenc msg: %s", m_plain_text);
     uint8_t random_key;
     status = psa_generate_random(&random_key, 1);
-    if(status != PSA_SUCCESS)
+    if (status != PSA_SUCCESS)
     {
-        LOG_ERR("error in generating random key selection %d",status);
+        LOG_ERR("error in generating random key selection %d", status);
         return -1;
     }
 
-    random_key %= 3;
+    random_key %= NUM_KEYS;
     LOG_INF("random key choice for encrypt: %d", random_key);
     status = encrypt_buffer(key_ids[random_key], m_plain_text, sizeof(m_plain_text), m_encrypted_text,
                             sizeof(m_encrypted_text), &olen, initialization_vector, iv_len, &gen_iv_len);
@@ -280,7 +280,7 @@ int main(void)
 
     // try all key IDs to decrypt (to mimic that the other device doesnt know which key was used)
     uint32_t final_olen;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < NUM_KEYS; i++)
     {
         LOG_INF("Decrypt attempt with key %d", i);
         status = decrypt_buffer(key_ids[i], m_encrypted_text, olen, m_decrypted_text,
