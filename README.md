@@ -35,6 +35,10 @@ The following [blog](https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/po
 
 Majority of the code was also based on the [persistent-key-usage](https://github.com/nrfconnect/sdk-nrf/tree/main/samples/crypto/persistent_key_usage) crypto sample.
 
+This sample also uses CTRL-AP APPROTECT to disable debug interface access.
+There are instructions in prj.conf for disabling this lock.
+
+
 
 
 # building and running
