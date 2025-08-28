@@ -228,12 +228,13 @@ int main(void)
     LOG_INF("enc op len: %d", olen);
 
     // try all key IDs to decrypt (to mimic that the other device doesnt know which key was used)
+    uint32_t final_olen;
     for (int i = 0; i < 3; i++)
     {
         LOG_INF("Decrypt attempt with key %d", i);
-        status = decrypt_buffer(key_ids[i], m_encrypted_text, sizeof(m_encrypted_text), m_decrypted_text,
+        status = decrypt_buffer(key_ids[i], m_encrypted_text, olen, m_decrypted_text,
                                 PSA_CIPHER_UPDATE_OUTPUT_SIZE(SAMPLE_KEY_TYPE, SAMPLE_ALG, sizeof(m_encrypted_text)),
-                                &olen, initialization_vector, iv_len);
+                                &final_olen, initialization_vector, gen_iv_len);
         if (status != PSA_SUCCESS)
         {
             LOG_ERR("Decryption failed: %d\n", status);
