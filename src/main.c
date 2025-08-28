@@ -38,8 +38,14 @@ static uint8_t m_decrypted_text[NRF_CRYPTO_EXAMPLE_PERSISTENT_KEY_MAX_TEXT_SIZE]
 
 LOG_MODULE_REGISTER(enc_central, LOG_LEVEL_DBG);
 
-psa_key_id_t mk;
-psa_key_id_t key_ids[3];
+// a master device should have a master key that is not a private secret
+// that each extra device has. for this demo, omit
+// psa_key_id_t mk = PSA_KEY_ID_USER_MIN;
+
+#define KEY_ID_USER0 PSA_KEY_ID_USER_MIN + 0
+#define KEY_ID_USER1 PSA_KEY_ID_USER_MIN + 1
+#define KEY_ID_USER2 PSA_KEY_ID_USER_MIN + 2
+psa_key_id_t key_ids[3] = {KEY_ID_USER0, KEY_ID_USER1, KEY_ID_USER2};
 
 int crypto_init(void)
 {
@@ -62,7 +68,8 @@ int crypto_finish(void)
     psa_status_t status;
 
     /* Destroy the key handle */
-    status = psa_destroy_key(mk);
+    for(int i=0;i<NUM_KEYS;i++)
+        status = psa_destroy_key(key_ids[i]);
     if (status != PSA_SUCCESS)
     {
         LOG_INF("psa_destroy_key failed! (Error: %d)", status);
@@ -70,6 +77,33 @@ int crypto_finish(void)
     }
 
     return 0;
+}
+
+bool psa_key_exists(psa_key_id_t key_id)
+{
+    psa_status_t status;
+    psa_key_attributes_t attrs = PSA_KEY_ATTRIBUTES_INIT;
+
+    status = psa_get_key_attributes(key_id, &attrs);
+    psa_reset_key_attributes(&attrs);
+
+    LOG_INF("KEY ID %d ATTR GET STATS %d",key_id,status);
+    // If the key isn't present, implementations return an error such as
+    // PSA_ERROR_DOES_NOT_EXIST / PSA_ERROR_INVALID_HANDLE.
+    return (status == PSA_SUCCESS);
+}
+
+bool all_keys_exist(psa_key_id_t *ids, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        if (!psa_key_exists(ids[i]))
+        {
+            return false;
+        }
+    }
+    LOG_INF("all keys exist");
+    return true;
 }
 
 int import_key(uint8_t *key_buf, size_t key_len, psa_key_id_t key_index)
@@ -185,23 +219,32 @@ int main(void)
     psa_status_t status;
 
     status = crypto_init();
-    // generate dummy keys.
-    // instead of using psa_generate_key, we will mock some buffer_rx to use psa import api.
-    // dont have key material in the code. These keys will be randomly gen & provided during a secure provision time.
-    uint8_t DEBUG_MOCK_KEYS[NUM_KEYS][KEY_SIZE];
 
-    // start at 1 https://arm-software.github.io/psa-api/crypto/1.2/api/keys/ids.html#c.PSA_KEY_ID_NULL
-    LOG_INF("generating and importing keys");
-    for (int i = 1; i < 4; i++)
+    if (!all_keys_exist(key_ids, NUM_KEYS))
     {
-        status = psa_generate_random(DEBUG_MOCK_KEYS[i - 1],
-                                     sizeof(DEBUG_MOCK_KEYS[i - 1]) / sizeof(DEBUG_MOCK_KEYS[i - 1][0]));
-        if (status != PSA_SUCCESS)
+        // generate dummy keys.
+        // instead of using psa_generate_key, we will mock some buffer_rx to use psa import api.
+        // dont have key material in the code. These keys will be randomly gen & provided during a secure provision
+        // time.
+        uint8_t DEBUG_MOCK_KEYS[NUM_KEYS][KEY_SIZE];
+
+        // start at 1 https://arm-software.github.io/psa-api/crypto/1.2/api/keys/ids.html#c.PSA_KEY_ID_NULL
+        LOG_INF("generating and importing keys");
+        for (int i = 1; i < 4; i++)
         {
-            LOG_INF("unable to generate key %d (%d)", i, status);
+            status = psa_generate_random(DEBUG_MOCK_KEYS[i - 1],
+                                         sizeof(DEBUG_MOCK_KEYS[i - 1]) / sizeof(DEBUG_MOCK_KEYS[i - 1][0]));
+            if (status != PSA_SUCCESS)
+            {
+                LOG_INF("unable to generate key %d (%d)", i, status);
+            }
+            LOG_INF("made key %s, importing", DEBUG_MOCK_KEYS[i - 1]);
+            import_key(DEBUG_MOCK_KEYS[i - 1], KEY_SIZE, i);
         }
-        LOG_INF("made key %s, importing", DEBUG_MOCK_KEYS[i - 1]);
-        import_key(DEBUG_MOCK_KEYS[i - 1], KEY_SIZE, i);
+    }
+    else
+    {
+        LOG_INF("Keys already exist, skipping to enc/dec");
     }
 
     // for iv, it's using psa_generate in the encrypt.
@@ -212,8 +255,16 @@ int main(void)
     size_t gen_iv_len;
 
     LOG_INF("unenc msg: %s", m_plain_text);
-    uint32_t random_key = rand() % 2;
-    LOG_INF("random key handle %d", random_key);
+    uint8_t random_key;
+    status = psa_generate_random(&random_key, 1);
+    if(status != PSA_SUCCESS)
+    {
+        LOG_ERR("error in generating random key selection %d",status);
+        return -1;
+    }
+
+    random_key %= 3;
+    LOG_INF("random key choice for encrypt: %d", random_key);
     status = encrypt_buffer(key_ids[random_key], m_plain_text, sizeof(m_plain_text), m_encrypted_text,
                             sizeof(m_encrypted_text), &olen, initialization_vector, iv_len, &gen_iv_len);
     if (status != PSA_SUCCESS)
@@ -253,6 +304,8 @@ int main(void)
             PRINT_HEX("dec", m_decrypted_text, sizeof(m_decrypted_text));
         }
     }
+
+    crypto_finish();
 
     for (;;)
     {
