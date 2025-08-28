@@ -23,9 +23,7 @@ The overall thinking is you provision each device with the keys, and it will use
 
 So with each transmission over whatever medium, you can also append the IV.
 The receiving device only knows the IV, it does not know which private key was used to encrypt.
-So it will iterate through all the keys it has to see if there's a match.
-
-You can alternatively rely on crcs or embedded control words.
+So it will iterate through all the keys it has to see if there's a match. You can also rely on crcs or embedded control words, standard best practices for data integrity.
 
 You can reset the device and it won't try to re-create new keys. It only creates new keys on a reset.
 
