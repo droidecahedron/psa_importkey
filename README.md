@@ -35,9 +35,14 @@ The following [blog](https://devzone.nordicsemi.com/nordic/nordic-blog/b/blog/po
 
 Majority of the code was also based on the [persistent-key-usage](https://github.com/nrfconnect/sdk-nrf/tree/main/samples/crypto/persistent_key_usage) crypto sample.
 
-This sample also uses CTRL-AP APPROTECT to disable debug interface access.
-There are instructions in prj.conf for disabling this lock.
+>[!NOTE]
+> This sample also uses CTRL-AP APPROTECT to disable debug interface access.
+>
+>Read more here: [CTRL-AP -- Control access port](https://docs.nordicsemi.com/bundle/ps_nrf54L15/page/ctrl-ap.html)
 
+There are instructions in prj.conf for disabling this lock. Attempting to interface w/ debugger with `nrfutil device flash` or `nrfutil device reset` will result in the below message unless you recover the device.  
+
+<img width="814" height="244" alt="image" src="https://github.com/user-attachments/assets/dadfbcab-0d15-42e3-9cd5-20678385d63d" />
 
 
 
